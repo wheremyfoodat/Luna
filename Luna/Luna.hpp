@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <fstream>
+#include "LunaTypes.hpp"
 
 #if defined(_WIN32) || defined(WIN32)
 #include <windows.h>
@@ -28,71 +29,13 @@ uint8_t* getExecutableMemory (size_t size) {
 
 
 namespace Luna {
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
-
-struct Label {
-    u32 addr;
-    std::string name;
-};
-
 const auto REX   = 0b01000000; 
 const auto REX_W = 0b01001000; // Promotes some instructions to 64 bits
 const auto REX_R = 0b01000100; // Acts as the 4th bit in a register number (for accessing r8/9/10 etc)
 const auto REX_B = 0b01000001; // Same as REX_R
+const auto REX_X = 0b01000010; // Extends SIB
 
-enum Distance {
-    Far = 0,
-    Near
-};
-
-enum Displacement {
-    Rel8, Rel16, Rel32, Automatic
-};
-
-enum Condition {
-    o   = 0, 
-    no  = 1, 
-    b   = 2, nae = 2, c =  2,
-    nb  = 3, ae  = 3, nc = 3,
-    e   = 4, z  = 4,
-    ne  = 5, nz = 5,
-    na  = 6, be = 6,
-    a   = 7, nbe = 7,
-    s   = 8,
-    ns  = 9,
-    p   = 10, pe = 10,
-    np  = 11, po = 11,
-    l   = 12, nge = 12,
-    nl  = 13, ge = 13,
-    ng  = 14, le = 14,
-    g   = 15, nle = 15
-};
-
-enum R64 {
-    rax = 0, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15
-};
-
-enum R32 {
-    eax = 0, ecx, edx, ebx, esp, ebp, esi, edi, r8d, r9d, r10d, r11d, r12d, r13d, r14d, r15d
-};
-
-enum R16 {
-    ax = 0, cx, dx, bx, sp, bp, si, di, r8w, r9w, r10w, r11w, r12w, r13w, r14w, r15w
-};
-
-enum R8 {
-    al = 0, cl, dl, bl, ah, ch, dh, bh, r8b, r9b, r10b, r11b, r12b, r13b, r14b, r15b, 
-    spl = 0x14, bpl, sil, dil // Special REX 8-bit registers
-};
-
-enum Segment {
-    cs, ss, ds, es, fs, gs
-};
-
-const std::array <const R64*, 16> qword = {(R64*) 0, (R64*) 1, (R64*) 2, (R64*) 3, (R64*) 4, (R64*) 5, (R64*) 6, (R64*) 7, (R64*) 8, (R64*) 9, (R64*) 10, (R64*) 11, (R64*) 12, (R64*) 13, (R64*) 14, (R64*) 15};   // Used for memory accesses. Eg access [rax] by doing qword [rax]
+QWord qword;
 
 class Generator {
     static const size_t kilobyte = 1024;
@@ -187,6 +130,38 @@ public:
         write <u8> (rex); // REX prefix
     write <u16> (opcode); // opcode
     write <u8> (((dest & 7) << 3) | (src & 7) | (0b11 << 6)); // mod r/m   
+  }
+
+  template <u8 opcode>
+  constexpr void op_r64_m64 (R64 dest, const SIB& src) {
+    auto rex = REX_W;
+    auto mod_rm = (((dest & 7) << 3) | 4);
+    auto sib = (src.base & 7) | ((src.index & 7) << 3) | ((src.scale) << 6);
+
+    if (dest >= R64::r8)
+        rex |= REX_R;
+
+    if (src.base >= R64::r8)
+        rex |= REX_B;
+    
+    if (src.index >= R64::r8)
+        rex |= REX_X;
+
+    if ((src.index & 7) == rsp)
+        printf ("[Luna] Tried to use rsp or r12 as the SIB index in an instruction. This is not a valid encoding! Ignored.\n");
+
+    if ((src.base & 7) == rbp) {
+       write <u8> (rex); // REX prefix
+       write <u16> (opcode | ((mod_rm | 0x40) << 8)); // Change mod rm, write it + opcode
+       write <u8> (sib);
+       write <u8> (0); // 1-byte displacement of 0
+       return;
+    }
+
+    write <u8> (rex); // REX prefix
+    write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+
+    write <u8> (sib);
   }
   
   template <u16 opcode, u16 extension> 
@@ -286,11 +261,43 @@ public:
     write <u16> ((opcode << 8) | rex); // REX + opcode
 
     switch (dest & 7) { // What the fuck are these edge cases?
-        case R64::rsp: write <u8> (mod_rm); write <u8> (0x24); return; // insert mod r/m and SIB for RBP/R12
-        case R64::rbp: write <u8> (mod_rm | 0x40); write <u8> (0x00); return; // Add a 1-byte displacement of 00 for RSP/R13
+        case R64::rsp: write <u8> (mod_rm); write <u8> (0x24); return; // insert mod r/m and SIB for RSP/R12
+        case R64::rbp: write <u8> (mod_rm | 0x40); write <u8> (0x00); return; // Add a 1-byte displacement of 00 for RBP/R13
     }
 
     write <u8> (mod_rm); // mod r/m 
+  }
+
+  template <u16 opcode>
+  constexpr void op_m64_r64 (const SIB& dest, R64 src) {
+    auto rex = REX_W;
+    auto mod_rm = (((src & 7) << 3) | 4);
+    auto sib = (dest.base & 7) | ((dest.index & 7) << 3) | ((dest.scale) << 6);
+
+    if (dest.base >= R64::r8)
+        rex |= REX_B;
+
+    if (dest.index >= R64::r8)
+        rex |= REX_X;
+    
+    if (src >= R64::r8)
+        rex |= REX_R;
+
+    if ((dest.index & 7) == rsp)
+        printf ("[Luna] Tried to use rsp as the SIB index in an instruction. This is not a valid encoding! Ignored.\n");
+
+    if ((dest.base & 7) == rbp) {
+       write <u8> (rex); // REX prefix
+       write <u16> (opcode | ((mod_rm | 0x40) << 8)); // Change mod rm, write it + opcode
+       write <u8> (sib);
+       write <u8> (0); // 1-byte displacement of 0
+       return;
+    }
+
+    write <u8> (rex); // REX prefix
+    write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+
+    write <u8> (sib);
   }
 
   template <u16 opcode>
@@ -439,6 +446,27 @@ public:
   constexpr void cmp (R64 dest, const R64* srcPtr) { op_r64_m64 <0x3B> (dest, srcPtr); } // cmp r64, [r64]
   constexpr void mov (R64 dest, const R64* srcPtr) { op_r64_m64 <0x8B> (dest, srcPtr); } // mov r64, [r64]
 
+  // With SIB
+  constexpr void add (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x03> (dest, srcPtr); } // add r64, [r64]
+  constexpr void OR  (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x0B> (dest, srcPtr); } // or  r64, [r64]
+  constexpr void adc (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x13> (dest, srcPtr); } // adc r64, [r64]
+  constexpr void sbb (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x1B> (dest, srcPtr); } // sbb r64, [r64]
+  constexpr void AND (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x23> (dest, srcPtr); } // and r64, [r64]
+  constexpr void sub (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x2B> (dest, srcPtr); } // sub r64, [r64]
+  constexpr void XOR (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x33> (dest, srcPtr); } // xor r64, [r64]
+  constexpr void cmp (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x3B> (dest, srcPtr); } // cmp r64, [r64]
+  constexpr void mov (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x8B> (dest, srcPtr); } // mov r64, [r64]
+
+  constexpr void add (const SIB& destPtr, R64 src) { op_m64_r64 <0x01> (destPtr, src); } // add [r64], r64
+  constexpr void OR  (const SIB& destPtr, R64 src) { op_m64_r64 <0x09> (destPtr, src); } // or  [r64], r64
+  constexpr void adc (const SIB& destPtr, R64 src) { op_m64_r64 <0x11> (destPtr, src); } // adc [r64], r64
+  constexpr void sbb (const SIB& destPtr, R64 src) { op_m64_r64 <0x19> (destPtr, src); } // sbb [r64], r64
+  constexpr void AND (const SIB& destPtr, R64 src) { op_m64_r64 <0x21> (destPtr, src); } // and [r64], r64
+  constexpr void sub (const SIB& destPtr, R64 src) { op_m64_r64 <0x29> (destPtr, src); } // sub [r64], r64
+  constexpr void XOR (const SIB& destPtr, R64 src) { op_m64_r64 <0x31> (destPtr, src); } // xor [r64], r64
+  constexpr void cmp (const SIB& destPtr, R64 src) { op_m64_r64 <0x39> (destPtr, src); } // cmp [r64], r64
+  constexpr void mov (const SIB& destPtr, R64 src) { op_m64_r64 <0x89> (destPtr, src); } // mov [r64], r64
+
   constexpr void inc (R64 reg) { op_r64 <0xFF, 0> (reg); } // inc r64
   constexpr void dec (R64 reg) { op_r64 <0xFF, 1> (reg); } // dec r64
   constexpr void call(R64 reg) { op_r64 <0xFF, 2> (reg); } // call r64
@@ -557,6 +585,20 @@ public:
       }
   }
 
+  constexpr void popcnt (R64 dest, R64 src) {// Popcnt r64, r64
+    write <u8> (0xF3);
+    auto rex = REX_W;
+    if (dest >= R64::r8)
+        rex |= REX_R;
+    if (src >= R64::r8)
+        rex |= REX_B; 
+
+    write <u8> (rex); // REX
+    write <u16> (0xB80F); // Opcode
+    write <u8> (((dest & 7) << 3) | (src & 7) | (0b11 << 6)); // mod r/m   
+  }
+
+
   void dump() {
       std::ofstream file ("output.exe", std::ios::binary);
       file.write ((const char*) buffer, bufferPtr);
@@ -593,4 +635,4 @@ public:
       bufferPtr = index;
   }
 };
-} // namespace Emitter
+} // namespace Luna

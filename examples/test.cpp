@@ -19,7 +19,7 @@ void helloWorld() {
 
 int main() {
     Generator code;
-
+/*
     code.ret();
     code.ret <Distance::Far>();
     code.nop();
@@ -95,7 +95,7 @@ int main() {
     code.vmlaunch();
     code.vmresume();
     code.vmxoff();
-
+*/
     code.mov (rax, qword [rcx]);
     code.mov (rcx, qword [r10]);
     code.mov (r10, qword [rbp]);
@@ -132,9 +132,23 @@ int main() {
     code.set <z> (r12b);
     code.set <e> (bl);
     code.set <o> (spl);
-
-    code.push (cs);
+ 
+    code.push (cs); // these 2 only work in 32-bit mode.
     code.pop (es);
+    code.popcnt (rsp, r12);
+
+    code.mov (rax, qword [r10 + rdx]);
+    code.mov (rbx, qword [r9 + rax]);
+    code.mov (rcx, qword [rsp + r10 * 8]);
+    code.mov (rax, qword [rax + rsp * 1]); // invalid encoding, throws warning
+    code.mov (rax, qword [rbp + rsi * 4]);
+    code.mov (rax, qword [rbp + rsp * 2]); // invalid encoding, throws warning
+    code.add (rax, qword [rbp + rdi * 2]);
+
+    code.cmp (qword [rax + rbp * 8], r12); 
+    code.mov (qword [r12 + rsi * 4], rax);
+    code.add (qword [r13 + r15 * 2], rdx);
+    code.sub (qword [rax + r15], rcx);
 
     code.dump();
 
