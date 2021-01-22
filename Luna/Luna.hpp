@@ -47,19 +47,85 @@ public:
   Generator (size_t codeSize = kilobyte) {
     buffer = getExecutableMemory(codeSize);
   }
-  
+private:
   template <typename T>
   constexpr void write (T val) {
       std::memcpy((void*) &buffer[bufferPtr], (void*) &val, sizeof(T));
       bufferPtr += sizeof(T);
   }
+
+  template <u8 opcode_group> // shift r8, cl
+  constexpr void shift (R8 dest) {
+      if (dest >= R8::r8b)
+          write <u8> (REX_B);
+      write <u8> (0xD2); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+  }
+
+  template <u8 opcode_group> // shift r16, cl
+  constexpr void shift (R16 dest) {
+      write <u8> (0x66); // 16-bit instruction prefix
+      if (dest >= R16::r8w)
+          write <u8> (REX_B);
+      write <u8> (0xD3); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+  }
   
-  template <Distance d = Distance::Near>
-  constexpr void ret() { 
-    if constexpr (d == Distance::Far) // ret far
-        write <u8> (0xCB);
-    else // ret near
-        write <u8> (0xC3);
+  template <u8 opcode_group> // shift r32, cl
+  constexpr void shift (R32 dest) {
+      if (dest >= R32::r8d)
+          write <u8> (REX_B);
+      write <u8> (0xD3); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+  }
+
+  template <u8 opcode_group> // shift r64, cl
+  constexpr void shift (R64 dest) {
+      auto rex = REX_W;
+      if (dest >= R64::r8)  
+          rex |= REX_B;
+      write <u8> (rex); // rex prefix
+      write <u8> (0xD3); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+  }
+
+  template <u8 opcode_group> // shift r8, imm
+  constexpr void shift (R8 dest, u8 imm) {
+      if (dest >= R8::r8b)
+          write <u8> (REX_B);
+      write <u8> (0xC0); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+      write <u8> (imm);
+  }
+
+  template <u8 opcode_group> // shift r16, imm
+  constexpr void shift (R16 dest, u8 imm) {
+      write <u8> (0x66); // 16-bit instruction prefix
+      if (dest >= R16::r8w)
+          write <u8> (REX_B);
+      write <u8> (0xC1); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+      write <u8> (imm);
+  }
+  
+  template <u8 opcode_group> // shift r32, imm
+  constexpr void shift (R32 dest, u8 imm) {
+      if (dest >= R32::r8d)
+          write <u8> (REX_B);
+      write <u8> (0xC1); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+      write <u8> (imm);
+  }
+
+  template <u8 opcode_group> // shift r64, imm
+  constexpr void shift (R64 dest, u8 imm) {
+      auto rex = REX_W;
+      if (dest >= R64::r8)  
+          rex |= REX_B;
+      write <u8> (rex); // rex prefix
+      write <u8> (0xC1); // opcode
+      write <u8> ((dest & 7) | (opcode_group << 3) | 0b11000000); // mod r/m
+      write <u8> (imm);
   }
 
   template <u16 opcode>
@@ -147,15 +213,34 @@ public:
     if (src.index >= R64::r8)
         rex |= REX_X;
 
-    if ((src.index & 7) == rsp)
-        printf ("[Luna] Tried to use rsp or r12 as the SIB index in an instruction. This is not a valid encoding! Ignored.\n");
+    if (src.index == rsp)
+        printf ("[Luna] Tried to use rsp as the SIB index in an instruction. This is not a valid encoding! Ignored.\n");
 
-    if ((src.base & 7) == rbp) {
+    if ((src.base & 7) == rbp && !src.displacement) {
        write <u8> (rex); // REX prefix
        write <u16> (opcode | ((mod_rm | 0x40) << 8)); // Change mod rm, write it + opcode
        write <u8> (sib);
        write <u8> (0); // 1-byte displacement of 0
        return;
+    }
+
+    if (src.displacement) { // With displacement
+        write <u8> (rex); // REX prefix 
+        if (src.displacement < 256) { // 1 byte displacement // TODO: Clamp to int8_t range properly
+            mod_rm |= 0x40;
+            write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+            write <u8> (sib);
+            write <u8> (src.displacement);
+
+        }
+        else { // 4 byte displacement
+            mod_rm |= 0x80;
+            write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+            write <u8> (sib);
+            write <u32> (src.displacement);
+        }
+        
+        return;
     }
 
     write <u8> (rex); // REX prefix
@@ -332,8 +417,17 @@ public:
       write <u32> (immediate); // immediate
   }
 
+public:
   constexpr void nop() { // single byte NOP
       write <u8> (0x90);
+  }
+
+  template <Distance d = Distance::Near>
+  constexpr void ret() { 
+    if constexpr (d == Distance::Far) // ret far
+        write <u8> (0xCB);
+    else // ret near
+        write <u8> (0xC3);
   }
 
   constexpr void mov (R32 reg, u32 immediate) { // mov r32, imm
@@ -476,6 +570,79 @@ public:
   constexpr void dec (R32 reg) { op_r32 <0xFF, 1> (reg); } // dec r32
   constexpr void call(R32 reg) { op_r32 <0xFF, 2> (reg); } // call r32
   constexpr void jmp (R32 reg) { op_r32 <0xFF, 4> (reg); } // jmp r32
+
+// shifts
+  constexpr void rol (R8 reg) { shift <0> (reg); } // rol r8, cl
+  constexpr void ror (R8 reg) { shift <1> (reg); } // ror r8, cl
+  constexpr void rcl (R8 reg) { shift <2> (reg); } // rcl r8, cl
+  constexpr void rcr (R8 reg) { shift <3> (reg); } // rcr r8, cl
+  constexpr void shl (R8 reg) { shift <4> (reg); } // shl r8, cl
+  constexpr void shr (R8 reg) { shift <5> (reg); } // shr r8, cl
+  constexpr void sal (R8 reg) { shift <6> (reg); } // sal r8, cl
+  constexpr void sar (R8 reg) { shift <7> (reg); } // sar r8, cl
+    
+  constexpr void rol (R16 reg) { shift <0> (reg); } // rol r16, cl
+  constexpr void ror (R16 reg) { shift <1> (reg); } // ror r16, cl
+  constexpr void rcl (R16 reg) { shift <2> (reg); } // rcl r16, cl
+  constexpr void rcr (R16 reg) { shift <3> (reg); } // rcr r16, cl
+  constexpr void shl (R16 reg) { shift <4> (reg); } // shl r16, cl
+  constexpr void shr (R16 reg) { shift <5> (reg); } // shr r16, cl
+  constexpr void sal (R16 reg) { shift <6> (reg); } // sal r16, cl
+  constexpr void sar (R16 reg) { shift <7> (reg); } // sar r16, cl
+
+  constexpr void rol (R32 reg) { shift <0> (reg); } // rol r32, cl
+  constexpr void ror (R32 reg) { shift <1> (reg); } // ror r32, cl
+  constexpr void rcl (R32 reg) { shift <2> (reg); } // rcl r32, cl
+  constexpr void rcr (R32 reg) { shift <3> (reg); } // rcr r32, cl
+  constexpr void shl (R32 reg) { shift <4> (reg); } // shl r32, cl
+  constexpr void shr (R32 reg) { shift <5> (reg); } // shr r32, cl
+  constexpr void sal (R32 reg) { shift <6> (reg); } // sal r32, cl
+  constexpr void sar (R32 reg) { shift <7> (reg); } // sar r32, cl
+
+  constexpr void rol (R64 reg) { shift <0> (reg); } // rol r64, cl
+  constexpr void ror (R64 reg) { shift <1> (reg); } // ror r64, cl
+  constexpr void rcl (R64 reg) { shift <2> (reg); } // rcl r64, cl
+  constexpr void rcr (R64 reg) { shift <3> (reg); } // rcr r64, cl
+  constexpr void shl (R64 reg) { shift <4> (reg); } // shl r64, cl
+  constexpr void shr (R64 reg) { shift <5> (reg); } // shr r64, cl
+  constexpr void sal (R64 reg) { shift <6> (reg); } // sal r64, cl
+  constexpr void sar (R64 reg) { shift <7> (reg); } // sar r64, cl
+
+  constexpr void rol (R8 reg, u8 imm) { shift <0> (reg, imm); } // rol r8, imm
+  constexpr void ror (R8 reg, u8 imm) { shift <1> (reg, imm); } // ror r8, imm
+  constexpr void rcl (R8 reg, u8 imm) { shift <2> (reg, imm); } // rcl r8, imm
+  constexpr void rcr (R8 reg, u8 imm) { shift <3> (reg, imm); } // rcr r8, imm
+  constexpr void shl (R8 reg, u8 imm) { shift <4> (reg, imm); } // shl r8, imm
+  constexpr void shr (R8 reg, u8 imm) { shift <5> (reg, imm); } // shr r8, imm
+  constexpr void sal (R8 reg, u8 imm) { shift <6> (reg, imm); } // sal r8, imm
+  constexpr void sar (R8 reg, u8 imm) { shift <7> (reg, imm); } // sar r8, imm
+    
+  constexpr void rol (R16 reg, u8 imm) { shift <0> (reg, imm); } // rol r16, imm
+  constexpr void ror (R16 reg, u8 imm) { shift <1> (reg, imm); } // ror r16, imm
+  constexpr void rcl (R16 reg, u8 imm) { shift <2> (reg, imm); } // rcl r16, imm
+  constexpr void rcr (R16 reg, u8 imm) { shift <3> (reg, imm); } // rcr r16, imm
+  constexpr void shl (R16 reg, u8 imm) { shift <4> (reg, imm); } // shl r16, imm
+  constexpr void shr (R16 reg, u8 imm) { shift <5> (reg, imm); } // shr r16, imm
+  constexpr void sal (R16 reg, u8 imm) { shift <6> (reg, imm); } // sal r16, imm
+  constexpr void sar (R16 reg, u8 imm) { shift <7> (reg, imm); } // sar r16, imm
+
+  constexpr void rol (R32 reg, u8 imm) { shift <0> (reg, imm); } // rol r32, imm
+  constexpr void ror (R32 reg, u8 imm) { shift <1> (reg, imm); } // ror r32, imm
+  constexpr void rcl (R32 reg, u8 imm) { shift <2> (reg, imm); } // rcl r32, imm
+  constexpr void rcr (R32 reg, u8 imm) { shift <3> (reg, imm); } // rcr r32, imm
+  constexpr void shl (R32 reg, u8 imm) { shift <4> (reg, imm); } // shl r32, imm
+  constexpr void shr (R32 reg, u8 imm) { shift <5> (reg, imm); } // shr r32, imm
+  constexpr void sal (R32 reg, u8 imm) { shift <6> (reg, imm); } // sal r32, imm
+  constexpr void sar (R32 reg, u8 imm) { shift <7> (reg, imm); } // sar r32, imm
+
+  constexpr void rol (R64 reg, u8 imm) { shift <0> (reg, imm); } // rol r64, imm
+  constexpr void ror (R64 reg, u8 imm) { shift <1> (reg, imm); } // ror r64, imm
+  constexpr void rcl (R64 reg, u8 imm) { shift <2> (reg, imm); } // rcl r64, imm
+  constexpr void rcr (R64 reg, u8 imm) { shift <3> (reg, imm); } // rcr r64, imm
+  constexpr void shl (R64 reg, u8 imm) { shift <4> (reg, imm); } // shl r64, imm
+  constexpr void shr (R64 reg, u8 imm) { shift <5> (reg, imm); } // shr r64, imm
+  constexpr void sal (R64 reg, u8 imm) { shift <6> (reg, imm); } // sal r64, imm
+  constexpr void sar (R64 reg, u8 imm) { shift <7> (reg, imm); } // sar r64, imm
 
   // push r64
   void push (R64 reg) {

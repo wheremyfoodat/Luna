@@ -44,6 +44,7 @@ enum Condition {
 
 struct SIB {
     u8 scale, index, base;
+    u32 displacement;
 };
 
 SIB currentSIB;
@@ -76,6 +77,11 @@ SIB& operator+(R64 base, SIB& sib) { // used for the [r64 + r64 * multipler] syn
     return currentSIB;
 }
 
+SIB& operator+(SIB& sib, u32 displacement) { // used for the [r64 + r64 * multiplier + disp] syntax
+    currentSIB.displacement = displacement;
+    return currentSIB;
+}
+
 enum R32 {
     eax = 0, ecx, edx, ebx, esp, ebp, esi, edi, r8d, r9d, r10d, r11d, r12d, r13d, r14d, r15d
 };
@@ -96,6 +102,6 @@ enum Segment {
 class QWord {
 public:
     R64* operator[](size_t idx) { return (R64*) (idx & 15); }
-    constexpr SIB& operator[](SIB& sib) { return sib; } // syntax sugar, used for the r64, [r64 + r64 * multiplier] syntax
+    constexpr const SIB& operator[](const SIB& sib) { return sib; } // syntax sugar, used for the r64, [r64 + r64 * multiplier + disp] syntax
 };
 } // end namespace Luna

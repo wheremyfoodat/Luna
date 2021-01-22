@@ -19,7 +19,7 @@ void helloWorld() {
 
 int main() {
     Generator code;
-/*
+
     code.ret();
     code.ret <Distance::Far>();
     code.nop();
@@ -95,7 +95,7 @@ int main() {
     code.vmlaunch();
     code.vmresume();
     code.vmxoff();
-*/
+
     code.mov (rax, qword [rcx]);
     code.mov (rcx, qword [r10]);
     code.mov (r10, qword [rbp]);
@@ -116,6 +116,9 @@ int main() {
     code.push (r15);
     code.test (rax, r11);
     code.cmc();
+    code.stc();
+    code.std();
+    code.cld();
 
     code.movzx (rax, r12w);
     code.movsx (r12d, ax);
@@ -136,6 +139,7 @@ int main() {
     code.push (cs); // these 2 only work in 32-bit mode.
     code.pop (es);
     code.popcnt (rsp, r12);
+    code.mov (rax, qword [r10 + r12]);
 
     code.mov (rax, qword [r10 + rdx]);
     code.mov (rbx, qword [r9 + rax]);
@@ -149,6 +153,20 @@ int main() {
     code.mov (qword [r12 + rsi * 4], rax);
     code.add (qword [r13 + r15 * 2], rdx);
     code.sub (qword [rax + r15], rcx);
+
+    code.mov (rax, qword [rax + rbp * 4 + 1024]);
+    code.mov (rax, qword [rax + rbp + 210]);
+
+    code.mov (qword [rdx + rax + 10], rax);
+    code.shr (al);
+    code.shl (ah);
+    code.ror (cl);
+    code.rol (r8b);
+    code.shr (ax);
+    code.rcl (r15d);
+    code.sal (r14);
+
+    code.rol (r10, 10);
 
     code.dump();
 
