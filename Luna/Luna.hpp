@@ -417,6 +417,16 @@ private:
       write <u32> (immediate); // immediate
   }
 
+  template <u16 opcode, u16 extension>
+  constexpr void op_r32_i32 (R32 reg, u32 immediate) {;
+      if (reg >= R64::r8)
+        write <u8> (REX_B); // REX prefix
+
+      write <u8> (opcode); // opcode
+      write <u8>  ((reg & 7) | (extension << 3) | (0b11 << 6)); // mod r/m
+      write <u32> (immediate); // immediate
+  }
+
 public:
   constexpr void nop() { // single byte NOP
       write <u8> (0x90);
@@ -466,6 +476,15 @@ public:
   constexpr void sub (R64 reg, u32 immediate) { op_r64_i32 <0x81, 5> (reg, immediate); }   // sub r64, imm32
   constexpr void XOR (R64 reg, u32 immediate) { op_r64_i32 <0x81, 6> (reg, immediate); }   // xor r64, imm32
   constexpr void cmp (R64 reg, u32 immediate) { op_r64_i32 <0x81, 7> (reg, immediate); }   // cmp r64, imm32
+
+  constexpr void add (R32 reg, u32 immediate) { op_r32_i32 <0x81, 0> (reg, immediate); }   // add r32, imm32
+  constexpr void OR  (R32 reg, u32 immediate) { op_r32_i32 <0x81, 1> (reg, immediate); }   // or  r32, imm32
+  constexpr void adc (R32 reg, u32 immediate) { op_r32_i32 <0x81, 2> (reg, immediate); }   // adc r32, imm32
+  constexpr void sbb (R32 reg, u32 immediate) { op_r32_i32 <0x81, 3> (reg, immediate); }   // sbb r32, imm32
+  constexpr void AND (R32 reg, u32 immediate) { op_r32_i32 <0x81, 4> (reg, immediate); }   // and r32, imm32
+  constexpr void sub (R32 reg, u32 immediate) { op_r32_i32 <0x81, 5> (reg, immediate); }   // sub r32, imm32
+  constexpr void XOR (R32 reg, u32 immediate) { op_r32_i32 <0x81, 6> (reg, immediate); }   // xor r32, imm32
+  constexpr void cmp (R32 reg, u32 immediate) { op_r32_i32 <0x81, 7> (reg, immediate); }   // cmp r32, imm32
 
   constexpr void add (R64 dest, R64 src) { op_r64_r64 <0x03> (dest, src); } // add r64, r64
   constexpr void OR  (R64 dest, R64 src) { op_r64_r64 <0x0B> (dest, src); } // or  r64, r64
@@ -780,6 +799,7 @@ public:
       bufferPtr = 0;
   }
 
+  // TODO: Add support for front labels, somehow
   void addLabel (std::string name) {
       Label label;
       label.addr = bufferPtr;
