@@ -167,6 +167,7 @@ int main() {
     code.sal (r14);
 
     code.rol (r10, 10);
+    code.add (r8d, dword [rax + rbx]);
 
     code.dump();
 

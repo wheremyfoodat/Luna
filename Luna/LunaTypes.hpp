@@ -53,9 +53,10 @@ enum R64 {
     rax = 0, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15
 };
 
-SIB& operator+(R64 base, R64 index) { // used for the [r64 + r64] syntax
+constexpr SIB& operator+(R64 base, R64 index) { // used for the [r64 + r64] syntax
     currentSIB.base = (u8) base;
     currentSIB.index = (u8)index;
+    currentSIB.displacement = 0;
     currentSIB.scale = 0;
 
     return currentSIB;
@@ -104,4 +105,11 @@ public:
     R64* operator[](size_t idx) { return (R64*) (idx & 15); }
     constexpr const SIB& operator[](const SIB& sib) { return sib; } // syntax sugar, used for the r64, [r64 + r64 * multiplier + disp] syntax
 };
+
+class DWord {
+public:
+    R64* operator[](size_t idx) { return (R64*) (idx & 15); }
+    constexpr const SIB& operator[](const SIB& sib) { return sib; } // syntax sugar, used for the r64, [r64 + r64 * multiplier + disp] syntax
+};
+
 } // end namespace Luna

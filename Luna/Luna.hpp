@@ -36,6 +36,7 @@ const auto REX_B = 0b01000001; // Same as REX_R
 const auto REX_X = 0b01000010; // Extends SIB
 
 QWord qword;
+DWord dword;
 
 class Generator {
     static const size_t kilobyte = 1024;
@@ -248,6 +249,57 @@ private:
 
     write <u8> (sib);
   }
+
+  template <u8 opcode>
+  constexpr void op_r32_m32 (R32 dest, const SIB& src) {
+    auto rex = 0;
+    auto mod_rm = (((dest & 7) << 3) | 4);
+    auto sib = (src.base & 7) | ((src.index & 7) << 3) | ((src.scale) << 6);
+
+    if (dest >= R32::r8d)
+        rex |= REX_R;
+
+    if (src.base >= R64::r8)
+        rex |= REX_B;
+    
+    if (src.index >= R64::r8)
+        rex |= REX_X;
+
+    if (src.index == rsp)
+        printf ("[Luna] Tried to use rsp as the SIB index in an instruction. This is not a valid encoding! Ignored.\n");
+
+    if ((src.base & 7) == rbp && !src.displacement) {
+       if (rex) write <u8> (rex); // REX prefix
+       write <u16> (opcode | ((mod_rm | 0x40) << 8)); // Change mod rm, write it + opcode
+       write <u8> (sib);
+       write <u8> (0); // 1-byte displacement of 0
+       return;
+    }
+
+    if (src.displacement) { // With displacement
+        if (rex) write <u8> (rex); // REX prefix 
+        if (src.displacement < 256) { // 1 byte displacement // TODO: Clamp to int8_t range properly
+            mod_rm |= 0x40;
+            write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+            write <u8> (sib);
+            write <u8> (src.displacement);
+
+        }
+        else { // 4 byte displacement
+            mod_rm |= 0x80;
+            write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+            write <u8> (sib);
+            write <u32> (src.displacement);
+        }
+        
+        return;
+    }
+
+    if (rex) write <u8> (rex); // REX prefix
+    write <u16> (opcode | (mod_rm << 8)); // MOD R/M + opcode
+
+    write <u8> (sib);
+  }
   
   template <u16 opcode, u16 extension> 
   constexpr void op_r32 (R32 reg) {
@@ -419,7 +471,7 @@ private:
 
   template <u16 opcode, u16 extension>
   constexpr void op_r32_i32 (R32 reg, u32 immediate) {;
-      if (reg >= R64::r8)
+      if (reg >= R32::r8d)
         write <u8> (REX_B); // REX prefix
 
       write <u8> (opcode); // opcode
@@ -569,6 +621,16 @@ public:
   constexpr void XOR (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x33> (dest, srcPtr); } // xor r64, [r64]
   constexpr void cmp (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x3B> (dest, srcPtr); } // cmp r64, [r64]
   constexpr void mov (R64 dest, const SIB& srcPtr) { op_r64_m64 <0x8B> (dest, srcPtr); } // mov r64, [r64]
+
+  constexpr void add (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x03> (dest, srcPtr); } // add r64, [r64]
+  constexpr void OR  (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x0B> (dest, srcPtr); } // or  r64, [r64]
+  constexpr void adc (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x13> (dest, srcPtr); } // adc r64, [r64]
+  constexpr void sbb (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x1B> (dest, srcPtr); } // sbb r64, [r64]
+  constexpr void AND (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x23> (dest, srcPtr); } // and r64, [r64]
+  constexpr void sub (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x2B> (dest, srcPtr); } // sub r64, [r64]
+  constexpr void XOR (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x33> (dest, srcPtr); } // xor r64, [r64]
+  constexpr void cmp (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x3B> (dest, srcPtr); } // cmp r64, [r64]
+  constexpr void mov (R32 dest, const SIB& srcPtr) { op_r32_m32 <0x8B> (dest, srcPtr); } // mov r64, [r64]
 
   constexpr void add (const SIB& destPtr, R64 src) { op_m64_r64 <0x01> (destPtr, src); } // add [r64], r64
   constexpr void OR  (const SIB& destPtr, R64 src) { op_m64_r64 <0x09> (destPtr, src); } // or  [r64], r64
