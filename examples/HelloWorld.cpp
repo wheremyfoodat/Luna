@@ -6,11 +6,7 @@ typedef void (*FunctionPointer)();
 int main() {
     const char* str = "Hello World!\n";
     Generator code;
-
-    auto stackOffset = 8;  // The offset needed to align the stack.
-#ifdef _WIN32
-        stackOffset += 32; // Windows needs an extra 32 bytes because of the "shadow" stack space
-#endif
+    auto stackOffset = 40;  // The offset needed to align the stack. Windows needs an extra 32 bytes because of the "shadow" stack space
 
     code.mov (rcx, (u64) str); // pointer to the string in rcx
     code.mov (rax, (u64) &printf); // pointer to printf in rax
